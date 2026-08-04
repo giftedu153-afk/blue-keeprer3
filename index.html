@@ -1,0 +1,1384 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0E2028">
+<title>줍깅 — 광안리</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{
+  --ink:#10262E; --ink-soft:#5B7480; --fog:#E7ECEE; --panel:#FFFFFF;
+  --tide:#0F8C9B; --buoy:#E8552F; --amber:#C98A16; --rule:#C4D0D5;
+  --sea:#A8CBD4; --land:#EDE7DA;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden}
+body{background:var(--fog);color:var(--ink);font-family:var(--sans);font-size:15px;
+  line-height:1.45;user-select:none;overscroll-behavior:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+:focus-visible{outline:3px solid var(--tide);outline-offset:2px}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft)}
+
+.app{max-width:520px;margin:0 auto;height:100%;position:relative;overflow:hidden;background:var(--fog)}
+.screen{display:none;position:absolute;inset:0;flex-direction:column}
+.screen.on{display:flex}
+.scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+/* ================= 지도 ================= */
+#map{position:absolute;inset:0;background:var(--sea);z-index:0}
+.leaflet-container{background:var(--sea)!important;font-family:var(--sans)}
+.leaflet-tile-pane{filter:saturate(.3) brightness(1.14) contrast(.78) hue-rotate(-6deg);opacity:.82}
+.leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.6)}
+.leaflet-control-zoom{display:none}
+
+.vignette{position:absolute;inset:0;pointer-events:none;z-index:400;
+  background:radial-gradient(ellipse at 50% 46%,transparent 42%,rgba(14,32,40,.28) 100%)}
+
+.maptoggle{position:absolute;right:12px;z-index:520;background:rgba(255,255,255,.94);
+  backdrop-filter:blur(8px);border-radius:11px;padding:7px 11px;font-size:12px;font-weight:700;
+  box-shadow:0 3px 12px rgba(16,38,46,.2);display:flex;align-items:center;gap:6px}
+.maptoggle .led{width:7px;height:7px;border-radius:50%;background:var(--tide)}
+.maptoggle.off .led{background:var(--rule)}
+.maptoggle.off{color:var(--ink-soft)}
+.maptoggle .spin{width:11px;height:11px;border:2px solid var(--rule);border-top-color:var(--tide);
+  border-radius:50%;animation:spin .8s linear infinite;display:none}
+.maptoggle.loading .spin{display:block}
+.maptoggle.loading .led{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.me{position:relative;width:26px;height:26px}
+.me .core{position:absolute;inset:4px;border-radius:50%;background:var(--tide);
+  border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35)}
+.me .ring{position:absolute;inset:-8px;border-radius:50%;border:2px solid rgba(15,140,155,.5);
+  animation:ping 2.4s ease-out infinite}
+@keyframes ping{0%{transform:scale(.6);opacity:.9}100%{transform:scale(1.5);opacity:0}}
+
+.mon{width:52px;height:60px;display:flex;flex-direction:column;align-items:center;
+  animation:bob 1.9s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.mon .body{width:36px;height:36px;border-radius:14px 14px 16px 16px;border:3px solid #fff;
+  box-shadow:0 4px 10px rgba(0,0,0,.32);position:relative}
+.mon .body::before,.mon .body::after{content:'';position:absolute;top:11px;width:5px;height:7px;
+  background:#10262E;border-radius:3px}
+.mon .body::before{left:8px} .mon .body::after{right:8px}
+.mon.boss .body{width:48px;height:48px;border-radius:50%;border-width:4px;
+  box-shadow:0 0 0 6px rgba(232,85,47,.28),0 6px 16px rgba(0,0,0,.4)}
+.mon .shadow{width:22px;height:5px;border-radius:50%;background:rgba(14,32,40,.3);margin-top:3px}
+.mon.far{opacity:.55;filter:grayscale(.5)}
+
+/* ================= HUD ================= */
+.hud-top{position:absolute;top:0;left:0;right:0;z-index:500;
+  padding:calc(env(safe-area-inset-top) + 9px) 12px 0;pointer-events:none}
+.hudrow{display:flex;gap:8px;align-items:stretch}
+.card{background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-radius:14px;
+  box-shadow:0 3px 14px rgba(16,38,46,.18);pointer-events:auto}
+
+.multcard{flex:none;width:106px;padding:8px 10px;text-align:center}
+.multcard .v{font-family:var(--mono);font-weight:700;font-size:30px;line-height:1;
+  letter-spacing:-.03em;font-variant-numeric:tabular-nums;transition:color .5s}
+.multcard .v .x{font-size:15px;opacity:.5}
+.bar{height:4px;border-radius:2px;background:var(--rule);margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--amber);
+  transition:width .6s cubic-bezier(.22,.9,.3,1),background .5s}
+
+.statcard{flex:1;padding:8px 11px;display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;
+  align-content:center}
+.statcard .k{font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--ink-soft)}
+.statcard .n{font-family:var(--mono);font-size:16px;font-weight:700;
+  font-variant-numeric:tabular-nums;line-height:1.1}
+
+.hint{margin-top:8px;background:rgba(16,38,46,.9);color:#DCE7EA;border-radius:11px;
+  padding:7px 11px;font-size:12.5px;pointer-events:auto;display:flex;gap:8px;align-items:center}
+.hint b{color:#7FE3D8}
+.hint.warn{background:var(--buoy);color:#fff}
+.hint.warn b{color:#fff}
+.gpspill{margin-left:auto;font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;opacity:.75}
+
+/* ================= 하단 조작 ================= */
+.hud-bot{position:absolute;left:0;right:0;bottom:0;z-index:500;
+  padding:10px 12px calc(env(safe-area-inset-bottom) + 12px);
+  background:linear-gradient(to top,rgba(14,32,40,.5),transparent);
+  display:flex;gap:10px;align-items:flex-end}
+.round{width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.94);
+  backdrop-filter:blur(8px);box-shadow:0 3px 14px rgba(16,38,46,.28);flex:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.round .ico{font-size:19px;line-height:1}
+.round .lb{font-size:8.5px;font-family:var(--mono);letter-spacing:.06em;color:var(--ink-soft)}
+.pickbtn{flex:1;height:64px;border-radius:20px;background:var(--tide);color:#fff;
+  font-size:20px;font-weight:700;box-shadow:0 4px 16px rgba(15,140,155,.45);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:transform .08s}
+.pickbtn:active{transform:scale(.97)}
+.donebtn{background:var(--ink);box-shadow:0 4px 16px rgba(16,38,46,.45)}
+.pickbtn .sub{font-size:10.5px;font-weight:400;opacity:.85;font-family:var(--mono);
+  letter-spacing:.08em;margin-top:2px}
+
+/* 대기 상태 = 지도만 살아 있는 포고식 초기 화면 */
+.idleinfo{background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-radius:11px;
+  padding:6px 11px;font-size:12.5px;margin-bottom:8px;text-align:center;
+  box-shadow:0 3px 12px rgba(16,38,46,.18)}
+.idleinfo b{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#idlebar{display:none}
+.idle #idlebar{display:flex}
+.idle #activebar{display:none}
+.idle .hudrow{display:none}
+
+/* ================= 조우 오버레이 ================= */
+.catch{position:absolute;inset:0;z-index:900;display:none;
+  background:radial-gradient(circle at 50% 42%,rgba(15,140,155,.96),rgba(10,26,32,.98));
+  color:#fff;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.catch.on{display:flex;animation:fadein .28s ease}
+.catch.boss{background:radial-gradient(circle at 50% 42%,rgba(232,85,47,.96),rgba(52,14,6,.98))}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.catch .blob{width:120px;height:120px;border-radius:32px;border:5px solid #fff;margin-bottom:20px;
+  animation:pop .45s cubic-bezier(.2,1.5,.4,1)}
+.catch.boss .blob{border-radius:50%;width:140px;height:140px}
+@keyframes pop{from{transform:scale(.2) rotate(-14deg)}to{transform:scale(1) rotate(0)}}
+.catch h2{font-size:30px;margin:0 0 6px;letter-spacing:-.02em}
+.catch p{margin:0;opacity:.82;font-size:14px;max-width:280px}
+.catch .ok{margin-top:26px;background:#fff;color:var(--ink);border-radius:14px;
+  padding:14px 40px;font-weight:700;font-size:16px}
+
+/* ================= 일반 화면 ================= */
+.pad{padding:calc(env(safe-area-inset-top) + 18px) 16px 18px}
+h1{font-size:27px;line-height:1.2;margin:8px 0 6px;letter-spacing:-.02em}
+h2{font-size:19px;margin:0 0 8px}
+p.lede{color:var(--ink-soft);font-size:14px;margin:0 0 18px}
+.note{font-size:12.5px;color:var(--ink-soft);line-height:1.55}
+.rule{height:1px;background:var(--rule);margin:18px 0}
+.kv{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--rule);font-size:14px}
+.kv b{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.actions{padding:12px 16px calc(env(safe-area-inset-bottom) + 14px);display:grid;gap:10px;background:var(--fog)}
+.btn{border-radius:14px;padding:16px;font-size:17px;font-weight:700;text-align:center;
+  border:2px solid transparent;transition:transform .08s}
+.btn:active{transform:scale(.985)}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-done{background:var(--panel);border-color:var(--ink)}
+.btn-ghost{background:transparent;color:var(--ink-soft);border-color:var(--rule);font-weight:400;font-size:14px;padding:11px}
+.shot{width:100%;aspect-ratio:4/3;border:2px dashed var(--rule);border-radius:12px;background:#F7FAFB;
+  display:flex;align-items:center;justify-content:center;color:var(--ink-soft);font-size:14px;
+  overflow:hidden;margin-bottom:12px}
+.shot img{width:100%;height:100%;object-fit:cover}
+input[type=file]{display:none}
+.dexgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:9px}
+.dexcell{background:var(--panel);border:1px solid var(--rule);border-radius:11px;padding:11px 9px;text-align:center}
+.glyph{width:44px;height:44px;margin:0 auto 7px;border-radius:12px;background:var(--rule)}
+.dexcell .nm{font-size:12.5px;font-weight:700}
+.dexcell .st{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--ink-soft);margin-top:2px}
+.dexcell.locked{opacity:.55}
+.dexcell.locked .nm{color:var(--ink-soft)}
+.stub{border:2px dashed var(--buoy);border-radius:14px;padding:16px;background:#FDF4F1;margin-bottom:14px}
+.stub .eyebrow{color:var(--buoy)}
+.statline{display:flex;gap:14px;margin-top:10px;font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums}
+.statline .up{color:var(--buoy);font-weight:700}
+.toast{position:absolute;left:50%;bottom:110px;transform:translate(-50%,20px);
+  width:min(440px,calc(100% - 28px));background:rgba(16,38,46,.95);color:#EAF2F4;border-radius:13px;
+  padding:12px 15px;opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;z-index:800}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast .t{font-weight:700;font-size:15px}
+.toast .d{font-size:12.5px;color:#9FB6BD;margin-top:2px}
+/* ================= 배틀 ================= */
+.btl{flex:1;display:flex;flex-direction:column;overflow:hidden;
+  padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 12px);
+  background:linear-gradient(180deg,#12303A 0%,#0E2028 100%);color:#EAF2F4}
+
+.foe{flex:none}
+.foerow{display:flex;align-items:baseline;gap:9px}
+.foename{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.foemult{font-family:var(--mono);font-size:13px;font-weight:700;color:#FFB79F;
+  background:rgba(232,85,47,.25);padding:2px 8px;border-radius:7px}
+.hpbar{height:9px;border-radius:5px;background:rgba(255,255,255,.13);margin-top:8px;overflow:hidden}
+.hpbar i{display:block;height:100%;width:100%;background:var(--buoy);transition:width .35s ease}
+.hpbar.mine i{background:#4BD6A0}
+.hprow{display:flex;justify-content:space-between;margin-top:5px;
+  font-family:var(--mono);font-size:11.5px;color:#9FB6BD}
+#foestate{color:#FFD9A0;font-weight:700}
+
+.foeart{height:96px;margin:14px auto 6px;width:96px;border-radius:26px;border:4px solid rgba(255,255,255,.9);
+  box-shadow:0 8px 24px rgba(0,0,0,.4);animation:bob 2.4s ease-in-out infinite;position:relative}
+.foeart.boss{border-radius:50%;width:112px;height:112px}
+.foeart::before,.foeart::after{content:'';position:absolute;top:32px;width:11px;height:15px;
+  background:#10262E;border-radius:6px}
+.foeart::before{left:22px} .foeart::after{right:22px}
+.foeart.hurt{animation:shake .3s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-9px)}75%{transform:translateX(9px)}}
+.foeflavor{text-align:center;font-size:12.5px;color:#8FA8B0;margin-bottom:8px}
+
+.btllog{flex:1;overflow-y:auto;background:rgba(0,0,0,.22);border-radius:11px;padding:9px 11px;
+  font-size:12.5px;line-height:1.65;min-height:56px;margin-bottom:10px}
+.btllog div{color:#B9CCD3}
+.btllog .hi{color:#7FE3D8;font-weight:700}
+.btllog .dmg{color:#FFB79F;font-weight:700}
+
+.mine{flex:none;margin-bottom:10px}
+.pips{display:flex;gap:3px;align-items:center}
+.pip{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.18)}
+.pip.on{background:var(--amber);box-shadow:0 0 6px rgba(201,138,22,.8)}
+
+.handwrap{flex:none;margin-bottom:10px}
+.handhint{font-size:12px;color:#9FB6BD;text-align:center;margin-bottom:7px;min-height:17px}
+.hand{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.card{border-radius:12px;padding:11px 5px 9px;text-align:center;background:rgba(255,255,255,.11);
+  border:2px solid transparent;transition:transform .12s,border-color .12s;position:relative}
+.card:active{transform:scale(.96)}
+.card.sel{border-color:#fff;transform:translateY(-7px);background:rgba(255,255,255,.2)}
+.card.atk{box-shadow:inset 0 -3px 0 var(--buoy)}
+.card.def{box-shadow:inset 0 -3px 0 var(--tide)}
+.card.chg{box-shadow:inset 0 -3px 0 var(--amber)}
+.card .ci{font-size:22px;line-height:1}
+.card .cn{font-size:12px;font-weight:700;margin-top:4px}
+.card .cc{font-family:var(--mono);font-size:9.5px;color:#9FB6BD;margin-top:2px}
+.card.dead{opacity:.3}
+
+.btlbtns{flex:none;display:grid;grid-template-columns:auto 1fr auto;gap:8px}
+.bbtn{border-radius:13px;padding:14px 16px;font-weight:700;font-size:15px}
+.bbtn.go{background:var(--tide);color:#fff}
+.bbtn.go:disabled{opacity:.35}
+.bbtn.end{background:rgba(255,255,255,.14);color:#EAF2F4}
+.bbtn.ghost{background:transparent;color:#7F9AA3;font-weight:400;font-size:13px}
+
+.result{position:absolute;inset:0;z-index:900;display:none;background:rgba(10,26,32,.96);
+  color:#fff;flex-direction:column;align-items:center;justify-content:center;padding:26px;text-align:center}
+.result.on{display:flex;animation:fadein .3s}
+.result h2{font-size:34px;margin:0 0 8px}
+.result p{color:#9FB6BD;font-size:14px;max-width:290px;margin:0}
+.result .ok{margin-top:26px;background:#fff;color:var(--ink);border-radius:14px;
+  padding:14px 44px;font-weight:700;font-size:16px}
+
+/* 테스트 패널 */
+#testpanel{position:absolute;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 92px);
+  z-index:700;background:rgba(16,38,46,.96);backdrop-filter:blur(10px);color:#EAF2F4;
+  border-radius:16px;padding:13px 14px;display:none;box-shadow:0 10px 32px rgba(0,0,0,.4);
+  max-height:64vh;overflow-y:auto}
+#testpanel.on{display:block}
+#testpanel .eyebrow{color:#7FA3AF;margin-bottom:7px}
+#testpanel .grp{margin-bottom:13px}
+#testpanel .grp:last-child{margin-bottom:0}
+.tchips{display:flex;flex-wrap:wrap;gap:6px}
+.tchip{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:9px;
+  background:rgba(255,255,255,.1);font-size:13px;font-weight:700;color:#EAF2F4}
+.tchip:active{background:rgba(255,255,255,.22)}
+.tchip .sw{width:11px;height:11px;border-radius:3px;flex:none}
+.tchip.wide{width:100%;justify-content:center}
+.tchip.danger{background:rgba(232,85,47,.22);color:#FFC3B0}
+.tchip.go{background:var(--tide);color:#fff}
+.tmult{display:flex;gap:6px}
+.tmult button{flex:1;padding:8px;border-radius:9px;background:rgba(255,255,255,.1);
+  font-family:var(--mono);font-size:13px;font-weight:700;color:#EAF2F4}
+.tmult button.sel{background:var(--buoy);color:#fff}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ===================== 필드 (지도) — 여기가 첫 화면 ===================== -->
+<section class="screen on idle" id="s-field">
+  <div id="map"></div>
+  <div class="vignette"></div>
+
+  <div class="hud-top">
+    <div class="hudrow">
+      <div class="card multcard">
+        <div class="eyebrow">배율</div>
+        <div class="v" id="mult"><span class="x">×</span>7.0</div>
+        <div class="bar"><i id="multbar"></i></div>
+      </div>
+      <div class="card statcard">
+        <div><div class="k">거리</div><div class="n" id="r-dist">0m</div></div>
+        <div><div class="k">시간</div><div class="n" id="r-time">00:00</div></div>
+        <div><div class="k">조우</div><div class="n" id="r-met">0</div></div>
+        <div><div class="k">다음출현</div><div class="n" id="r-next">250m</div></div>
+      </div>
+    </div>
+    <div class="hint" id="hint">
+      <span id="hinttext">위치를 잡는 중입니다</span>
+      <span class="gpspill" id="gpspill">GPS —</span>
+    </div>
+  </div>
+
+  <div class="hud-bot" id="activebar">
+    <button class="round" id="btn-recenter"><span class="ico">◎</span><span class="lb">중앙</span></button>
+    <div style="flex:1">
+      <div class="idleinfo" id="runinfo">줍깅 중 — 폰은 넣어두셔도 됩니다</div>
+      <button class="pickbtn donebtn" id="btn-done" style="width:100%">줍깅 완료
+        <span class="sub">여기서 배율이 확정됩니다</span></button>
+    </div>
+    <button class="round" id="btn-dex2"><span class="ico">▤</span><span class="lb">도감</span></button>
+  </div>
+
+  <div class="hud-bot" id="idlebar">
+    <button class="round" id="btn-dex1"><span class="ico">▤</span><span class="lb">도감</span></button>
+    <div style="flex:1">
+      <div class="idleinfo">지금 시작하면 <b id="idle-mult">×7.0</b> · 보유 <b id="cfg-coin">0</b> 코인</div>
+      <button class="pickbtn" id="btn-start" style="width:100%">줍깅 시작
+        <span class="sub">시간과 거리만 셉니다</span></button>
+    </div>
+    <button class="round" id="btn-recenter2"><span class="ico">◎</span><span class="lb">중앙</span></button>
+  </div>
+
+  <button class="maptoggle" id="btn-bld" style="top:calc(env(safe-area-inset-top) + 132px)">
+    <span class="led"></span><span class="spin"></span><span id="bldlabel">건물</span>
+  </button>
+  <button class="maptoggle off" id="btn-gwangalli" style="top:calc(env(safe-area-inset-top) + 172px)">
+    광안리로
+  </button>
+  <button class="maptoggle off" id="btn-test" style="top:calc(env(safe-area-inset-top) + 212px)">
+    테스트
+  </button>
+
+  <div id="testpanel">
+    <div class="grp">
+      <div class="eyebrow">지도에 소환 — 30m 앞에 나타납니다</div>
+      <div class="tchips" id="t-spawn"></div>
+    </div>
+    <div class="grp">
+      <div class="eyebrow">적용 배율</div>
+      <div class="tmult" id="t-mult"></div>
+    </div>
+    <div class="grp">
+      <div class="eyebrow">배틀 화면으로 바로 — 줍깅 없이 테스트</div>
+      <div class="tchips" id="t-battle"></div>
+    </div>
+    <div class="grp">
+      <div class="eyebrow">초기화</div>
+      <div class="tchips">
+        <button class="tchip danger" id="t-clearq">대기열 비우기</button>
+        <button class="tchip danger" id="t-cleardex">도감 초기화</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"><div class="t" id="toast-t"></div><div class="d" id="toast-d"></div></div>
+
+  <div class="catch" id="catch">
+    <div class="blob" id="c-blob"></div>
+    <h2 id="c-name">—</h2>
+    <p id="c-flavor"></p>
+    <button class="ok" id="c-ok">도감에 기록</button>
+  </div>
+</section>
+
+<!-- ===================== 인증 ===================== -->
+<section class="screen" id="s-verify">
+  <div class="scroll"><div class="pad">
+    <div class="eyebrow">세션 종료 · 배율 확정</div>
+    <h1 id="v-mult">×7.0 로 확정</h1>
+    <p class="lede">모은 쓰레기를 찍어 인증하면 업그레이드 재화가 지급됩니다. 인증은 재화 조건일 뿐, 배틀은 인증 없이도 할 수 있습니다.</p>
+    <div class="shot" id="shot"><span>사진 없음</span></div>
+    <input type="file" id="file" accept="image/*" capture="environment">
+    <button class="btn btn-done" id="btn-shoot" style="width:100%">모은 쓰레기 촬영</button>
+    <div class="rule"></div>
+    <div class="kv"><span>이동 거리</span><b id="v-dist">0 m</b></div>
+    <div class="kv"><span>줍깅 시간</span><b id="v-time">00:00</b></div>
+    <div class="kv"><span>수거 개수</span><b id="v-pick">0</b></div>
+    <div class="kv"><span>지급 예정 정화코인</span><b id="v-coin">0</b></div>
+  </div></div>
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-toBattle">배틀 대기열로 (<span id="v-queue">0</span>)</button>
+  </div>
+</section>
+
+<!-- ===================== 배틀 ===================== -->
+<section class="screen" id="s-battle">
+  <div class="btl">
+
+    <div class="foe">
+      <div class="foerow">
+        <span class="foename" id="b-name">—</span>
+        <span class="foemult" id="b-mult">×1.0</span>
+      </div>
+      <div class="hpbar"><i id="foehp"></i></div>
+      <div class="hprow"><span id="foehptext">0 / 0</span><span id="foestate"></span></div>
+      <div class="foeart" id="foeart"></div>
+      <div class="foeflavor" id="b-flavor"></div>
+    </div>
+
+    <div class="btllog" id="btllog"></div>
+
+    <div class="mine">
+      <div class="hpbar mine"><i id="myhp"></i></div>
+      <div class="hprow"><span id="myhptext">120 / 120</span><span class="pips" id="energy"></span></div>
+    </div>
+
+    <div class="handwrap">
+      <div class="handhint" id="handhint">카드를 골라 실행하세요</div>
+      <div class="hand" id="hand"></div>
+    </div>
+
+    <div class="btlbtns">
+      <button class="bbtn end" id="b-toss">버리기</button>
+      <button class="bbtn go" id="b-play">실행</button>
+      <button class="bbtn end" id="b-end">턴 종료</button>
+    </div>
+    <button class="bbtn ghost" id="b-flee" style="margin-top:2px">물러나기</button>
+  </div>
+
+  <div class="result" id="result">
+    <h2 id="res-title">—</h2>
+    <p id="res-desc"></p>
+    <button class="ok" id="res-ok">확인</button>
+  </div>
+</section>
+
+<!-- ===================== 도감 ===================== -->
+<section class="screen" id="s-dex">
+  <div class="scroll"><div class="pad">
+    <div class="eyebrow">광안리 도감</div>
+    <h1 id="dex-count">0 / 0</h1>
+    <p class="lede">만나면 실루엣, 이기면 색이 확정됩니다. 확정된 놈은 다시 나타나지 않습니다.</p>
+    <div class="dexgrid" id="dexgrid"></div>
+    <div class="rule"></div>
+    <h2>재도전 대기열</h2>
+    <div id="queuelist"></div>
+  </div></div>
+  <div class="actions"><button class="btn btn-primary" id="btn-back">돌아가기</button></div>
+</section>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ============================================================
+   튜닝 상수 — 밸런스는 전부 여기서
+   ============================================================ */
+/* ============================================================
+   Mapbox 연결 — 이 두 값만 채우면 실지도로 바뀝니다
+   1) MAPBOX_TOKEN: mapbox.com 대시보드의 pk. 로 시작하는 토큰
+   2) MAPBOX_STYLE: Mapbox Studio에서 만든 커스텀 스타일 URL
+      (라벨을 다 끄고 건물 레이어만 남긴 스타일을 추천합니다.
+       비워두면 기본 라이트 스타일을 씁니다 — 라벨이 보입니다)
+   토큰을 비워두면 이전처럼 CARTO/OSM 무료 타일로 자동 대체됩니다.
+   ============================================================ */
+const MAPBOX_TOKEN = '';   // 예: 'pk.eyJ1Ijoi...'
+const MAPBOX_STYLE  = '';  // 예: 'mapbox://styles/계정명/abcd1234'
+                            //     비우면 'mapbox/light-v11' 사용
+
+const CFG = {
+  MULT_MAX:7.0, MULT_MIN:1.0,
+  // 노력 지수 = 줍깅 시간(분) + 이동 거리(m)/20
+  //   10분 / 0.5km  ->  35  (하한 이하 = ×7.0)
+  //   3시간 / 6km   -> 480  (상한       = ×1.0)
+  EFF_FLOOR:40, EFF_CEIL:480,
+  EFF_PER_MIN:1, EFF_PER_M:1/20,
+
+  CHARGE_PER_10M:4, CHARGE_FULL:100,   // 약 250m마다 한 마리
+  AUTO_CATCH:true,                      // 사거리 안에 들어오면 폰 안 봐도 자동 등록
+  SPAWN_MIN_M:18, SPAWN_MAX_M:55,
+  CATCH_RANGE_M:40,
+  SPAWN_TTL_MS:4*60*1000,
+  MAX_ON_MAP:4,
+
+  BOSS_MIN_EFF:60, BOSS_CHANCE:0.5,
+  COIN_PER_M:0.5, COIN_PER_MIN:2,
+
+  GPS_MAX_ACCURACY:40, GPS_MAX_SPEED:8,
+  START:[35.1531,129.1189]
+};
+
+/* 건물 입체 렌더링 — OSM 건물 폴리곤을 받아 음영만 준 덩어리로 그림 */
+const BLD = {
+  ON:true,
+  RADIUS_M:380,        // 한 번에 받아오는 반경
+  REFETCH_M:220,       // 이만큼 벗어나면 다시 받음
+  MAX:450,             // 성능 상한 (구형 폰에서 버벅이면 낮추세요)
+  DEFAULT_LEVELS:3,
+  M_PER_LEVEL:3.2,
+  LEAN:0.9,            // 화면 위쪽으로 눕히는 정도 = 입체감
+  ROOF:'#E8EFF2', WALL:'#A3B3BA', EDGE:'#7C929B', SHADOW:'#0E2028'
+};
+
+const SPECIES=[
+  {id:'kkongcho',name:'꽁초충',color:'#8A7355',w:34,atk:12,hp:45, flavor:'모래 한 줌에 열 개씩 섞여 나온다.'},
+  {id:'candakji',name:'캔딱지',color:'#9AA7AE',w:22,atk:16,hp:60, flavor:'밟으면 납작해지지만 사라지진 않는다.'},
+  {id:'ppaldae',name:'빨대뱀',color:'#D9534F',w:16,atk:20,hp:55, flavor:'가늘고 길게 모래 속을 파고든다.'},
+  {id:'binyl',name:'비닐해파리',color:'#7FB8C4',w:14,atk:18,hp:85, flavor:'물에 뜨면 진짜 해파리와 구분이 안 된다.'},
+  {id:'cup',name:'컵그림자',color:'#C2A87E',w:10,atk:24,hp:75, flavor:'여름 밤이면 벤치마다 하나씩 서 있다.'},
+  {id:'pokjuk',name:'폭죽재',color:'#5C4A8A',w:4, atk:25,hp:100,flavor:'광안리에서만 나온다. 축제 다음 날 새벽에 특히.'}
+];
+const BOSS={id:'peulla',name:'플라',color:'#E8552F',boss:true,atk:18,hp:135,
+  flavor:'수십 년치 페트병이 파도에 갈려 하나로 뭉친 것.'};
+const ALL=[...SPECIES,BOSS];
+
+let S={coins:0,dex:{},queue:[]};
+let F=null, map=null, meMarker=null, accCircle=null, pathLine=null;
+let watchId=null, simTimer=null, tickTimer=null, follow=true, curBattle=null, curCatch=null;
+let tileFails=0, tilesOk=false;
+let bldLayer=null, bldRenderer=null, bldCenter=null, bldBusy=false, bldFailed=false;
+let lastPos=null, curAcc=null;
+
+const $=s=>document.querySelector(s);
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+
+/* ---------- 저장 ---------- */
+async function load(){
+  try{const r=await window.storage.get('plogging:v2'); if(r&&r.value) S=JSON.parse(r.value);}catch(e){}
+  S.dex=S.dex||{}; S.queue=S.queue||[]; S.coins=S.coins||0; paintCoins();
+}
+async function save(){ try{await window.storage.set('plogging:v2',JSON.stringify(S));}catch(e){} }
+function paintCoins(){ $('#cfg-coin').textContent=S.coins.toLocaleString(); }
+
+function show(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
+  $('#'+id).classList.add('on');
+  if(id==='s-field'&&map) setTimeout(()=>map.invalidateSize(),60);
+}
+
+/* ---------- 배율 ---------- */
+const effortOf=f=>f.minutes()*CFG.EFF_PER_MIN+f.dist*CFG.EFF_PER_M;
+function multOf(eff){
+  const p=clamp((eff-CFG.EFF_FLOOR)/(CFG.EFF_CEIL-CFG.EFF_FLOOR),0,1);
+  return CFG.MULT_MIN+(CFG.MULT_MAX-CFG.MULT_MIN)*(1-p);
+}
+function multColor(m){ return m>=5?'#E8552F' : m>=2.5?'#C98A16' : '#0F8C9B'; }
+
+/* ---------- 지오 ---------- */
+function haversine(a,b){
+  const R=6371000,r=Math.PI/180;
+  const dLat=(b.lat-a.lat)*r,dLon=(b.lon-a.lon)*r;
+  const s=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function offset(lat,lon,dist,bearing){
+  const dLat=dist*Math.cos(bearing)/111320;
+  const dLon=dist*Math.sin(bearing)/(111320*Math.cos(lat*Math.PI/180));
+  return [lat+dLat,lon+dLon];
+}
+
+/* ---------- 지도 ---------- */
+function initMap(){
+  if(map) return;
+  map=L.map('map',{zoomControl:false,attributionControl:true,
+    zoomSnap:.5,inertia:true,tap:true}).setView(CFG.START,18);
+
+  const TILE_SOURCES=[];
+  if(MAPBOX_TOKEN){
+    const styleId=(MAPBOX_STYLE||'mapbox/light-v11').replace('mapbox://styles/','');
+    TILE_SOURCES.push({
+      url:'https://api.mapbox.com/styles/v1/'+styleId+'/tiles/{z}/{x}/{y}{r}?access_token='+MAPBOX_TOKEN,
+      attr:'© Mapbox © OpenStreetMap', max:22
+    });
+  }
+  TILE_SOURCES.push(
+    {url:'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+     attr:'© OpenStreetMap, © CARTO', max:20},
+    {url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+     attr:'© OpenStreetMap', max:19}
+  );
+  let srcIdx=0, curTiles=null;
+  function tryTiles(){
+    if(srcIdx>=TILE_SOURCES.length){ drawFallback(); return; }
+    const s=TILE_SOURCES[srcIdx];
+    let fails=0, ok=false;
+    curTiles=L.tileLayer(s.url,{maxZoom:s.max,attribution:s.attr});
+    curTiles.on('tileload',()=>{ ok=true; tilesOk=true; });
+    curTiles.on('tileerror',()=>{
+      if(ok) return;
+      if(++fails>4){ nextSource(); }
+    });
+    curTiles.addTo(map);
+    setTimeout(()=>{ if(!ok) nextSource(); },6000);
+    function nextSource(){
+      if(ok||srcIdx>=TILE_SOURCES.length) return;
+      try{ map.removeLayer(curTiles); }catch(e){}
+      srcIdx++; tryTiles();
+    }
+  }
+  tryTiles();
+
+  bldRenderer=L.canvas({padding:.25});
+  bldLayer=L.layerGroup().addTo(map);
+
+  pathLine=L.polyline([],{color:'#0F8C9B',weight:5,opacity:.75,lineJoin:'round'}).addTo(map);
+  accCircle=L.circle(CFG.START,{radius:0,color:'#0F8C9B',weight:1,
+    fillColor:'#0F8C9B',fillOpacity:.1}).addTo(map);
+  meMarker=L.marker(CFG.START,{icon:L.divIcon({className:'',
+    html:'<div class="me"><div class="ring"></div><div class="core"></div></div>',
+    iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:1000,interactive:false}).addTo(map);
+
+  map.on('dragstart',()=>{follow=false});
+}
+
+/* 실측 확인된 기준 좌표 (Google Places) */
+const LANDMARKS=[
+  {name:'광안리해수욕장', lat:35.1531696, lon:129.118666},
+  {name:'광안대교',       lat:35.1475510, lon:129.1302088}
+];
+
+/* 타일을 못 불러왔을 때 — 지형을 지어내지 않는다.
+   좌표계는 그대로 살아 있으므로 격자와 기준점만 표시한다. */
+let fallbackDrawn=false;
+function drawFallback(){
+  if(fallbackDrawn) return; fallbackDrawn=true;
+  const el=document.querySelector('.leaflet-tile-pane');
+  if(el) el.style.display='none';
+  document.getElementById('map').style.background='#DCE5E8';
+
+  const g=L.layerGroup().addTo(map);
+  // 100m 간격 격자 — 거리 감각용
+  const step=100/111320;
+  for(let i=-20;i<=20;i++){
+    const la=35.1531696+i*step;
+    g.addLayer(L.polyline([[la,129.100],[la,129.140]],
+      {color:'#B9C6CC',weight:1,interactive:false}));
+    const lo=129.118666+i*step/Math.cos(35.153*Math.PI/180);
+    g.addLayer(L.polyline([[35.140,lo],[35.166,lo]],
+      {color:'#B9C6CC',weight:1,interactive:false}));
+  }
+  LANDMARKS.forEach(m=>{
+    g.addLayer(L.circleMarker([m.lat,m.lon],{radius:6,color:'#10262E',weight:2,
+      fillColor:'#fff',fillOpacity:1,interactive:false}));
+    g.addLayer(L.marker([m.lat,m.lon],{interactive:false,icon:L.divIcon({className:'',
+      html:'<div style="font:700 11px/1 -apple-system,sans-serif;color:#10262E;'+
+           'background:rgba(255,255,255,.85);padding:3px 6px;border-radius:5px;'+
+           'white-space:nowrap;transform:translate(10px,-6px)">'+m.name+'</div>',
+      iconSize:[0,0]})}));
+  });
+  toast('지도 이미지를 못 불러왔습니다','좌표와 거리 계산은 정상입니다. 격자 한 칸이 100m입니다.',false);
+}
+
+/* ---------- 건물 (OSM Overpass → 가짜 3D) ---------- */
+/* Mapbox 커스텀 스타일을 쓰면 건물 음영이 지도 자체에 이미 있으므로
+   Overpass 건물 오버레이는 겹치지 않게 자동으로 끈다. */
+const USING_MAPBOX_BUILDINGS = !!MAPBOX_TOKEN;
+
+function setBldUI(state){
+  const b=$('#btn-bld'), l=$('#bldlabel');
+  b.classList.toggle('loading',state==='loading');
+  b.classList.toggle('off',state==='off');
+  l.textContent = state==='loading' ? '불러오는 중'
+                : state==='off' ? '건물 꺼짐'
+                : state==='fail' ? '건물 없음' : '건물';
+}
+
+async function fetchBuildings(lat,lon){
+  const dLat=BLD.RADIUS_M/111320;
+  const dLon=dLat/Math.cos(lat*Math.PI/180);
+  const bbox=[(lat-dLat).toFixed(6),(lon-dLon).toFixed(6),
+              (lat+dLat).toFixed(6),(lon+dLon).toFixed(6)].join(',');
+  const q=`[out:json][timeout:25];way["building"](${bbox});(._;>;);out body;`;
+  const res=await fetch('https://overpass-api.de/api/interpreter',{
+    method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'data='+encodeURIComponent(q)
+  });
+  if(!res.ok) throw new Error('overpass '+res.status);
+  const data=await res.json();
+
+  const nodes={};
+  data.elements.forEach(e=>{ if(e.type==='node') nodes[e.id]=[e.lat,e.lon]; });
+  const out=[];
+  data.elements.forEach(e=>{
+    if(e.type!=='way'||!e.nodes||e.nodes.length<3) return;
+    const coords=e.nodes.map(id=>nodes[id]).filter(Boolean);
+    if(coords.length<3) return;
+    const t=e.tags||{};
+    let levels=parseFloat(t['building:levels']);
+    if(!levels && t.height) levels=parseFloat(t.height)/BLD.M_PER_LEVEL;
+    if(!levels||!isFinite(levels)) levels=BLD.DEFAULT_LEVELS;
+    const cLat=coords.reduce((a,c)=>a+c[0],0)/coords.length;
+    out.push({coords,levels:clamp(levels,1,40),cLat});
+  });
+  return out;
+}
+
+function renderBuildings(list){
+  if(!bldLayer) return;
+  bldLayer.clearLayers();
+  // 북쪽(화면 위) 건물부터 그려야 남쪽 건물이 위로 덮인다
+  list.sort((a,b)=>b.cLat-a.cLat).slice(0,BLD.MAX).forEach(b=>{
+    const h=b.levels*BLD.M_PER_LEVEL*BLD.LEAN/111320;   // 위도 단위 높이
+    const roof=b.coords.map(([la,lo])=>[la+h,lo]);
+    const shadow=b.coords.map(([la,lo])=>[la-h*0.12,lo+h*0.12]);
+    L.polygon(shadow,{renderer:bldRenderer,stroke:false,fillColor:BLD.SHADOW,
+      fillOpacity:.16,interactive:false}).addTo(bldLayer);
+    L.polygon(b.coords,{renderer:bldRenderer,stroke:false,fillColor:BLD.WALL,
+      fillOpacity:.95,interactive:false}).addTo(bldLayer);
+    L.polygon(roof,{renderer:bldRenderer,color:BLD.EDGE,weight:1,opacity:.7,
+      fillColor:BLD.ROOF,fillOpacity:1,interactive:false}).addTo(bldLayer);
+  });
+}
+
+async function refreshBuildings(lat,lon){
+  if(USING_MAPBOX_BUILDINGS){ setBldUI('off'); return; }  // Mapbox 스타일이 이미 그려줌
+  if(!BLD.ON||bldBusy||bldFailed||!map) return;
+  if(bldCenter && haversine({lat:bldCenter[0],lon:bldCenter[1]},{lat,lon})<BLD.REFETCH_M) return;
+  bldBusy=true; setBldUI('loading');
+  try{
+    const list=await fetchBuildings(lat,lon);
+    bldCenter=[lat,lon];
+    renderBuildings(list);
+    setBldUI(list.length?'on':'fail');
+  }catch(e){
+    bldFailed=true; setBldUI('fail');
+    toast('건물 데이터를 못 받았습니다','미리보기에서 외부 요청이 막혔을 수 있습니다. 파일을 폰에서 직접 열면 뜹니다.',false);
+  }finally{ bldBusy=false; }
+}
+
+$('#btn-bld').onclick=()=>{
+  if(USING_MAPBOX_BUILDINGS){
+    toast('Mapbox 지도 사용 중','건물은 지도 스타일에 이미 포함되어 있어 따로 켜고 끌 수 없습니다.',false);
+    return;
+  }
+  BLD.ON=!BLD.ON;
+  if(!BLD.ON){ if(bldLayer) bldLayer.clearLayers(); setBldUI('off'); }
+  else{
+    bldFailed=false; bldCenter=null; setBldUI('on');
+    if(lastPos) refreshBuildings(lastPos.lat,lastPos.lon);
+  }
+};
+
+/* ---------- 세션 ---------- */
+function newSession(){
+  return {t0:Date.now(),dist:0,charge:0,path:[],last:null,acc:null,
+    met:[],spawns:[],bossSpawned:false,
+    minutes(){return (Date.now()-this.t0)/60000}};
+}
+function setIdle(on){
+  $('#s-field').classList.toggle('idle',on);
+  if(on) $('#idle-mult').textContent='×'+CFG.MULT_MAX.toFixed(1);
+}
+function startSession(){
+  F=newSession();
+  if(lastPos){ F.path=[[lastPos.lat,lastPos.lon]]; pathLine.setLatLngs(F.path); }
+  setIdle(false);
+  clearInterval(tickTimer);
+  tickTimer=setInterval(paintHUD,500);
+  paintHUD();
+}
+
+/* 앱을 열면 곧장 지도 — 포고식 초기 화면 */
+function boot(){
+  show('s-field'); initMap(); setIdle(true);
+  setTimeout(()=>map.invalidateSize(),80);
+  refreshBuildings(CFG.START[0],CFG.START[1]);
+  startGPS();
+}
+
+function startGPS(){
+  if(!navigator.geolocation){ setPill('미지원'); startSim(true); return; }
+  setPill('확인중');
+  watchId=navigator.geolocation.watchPosition(onFix,onErr,
+    {enableHighAccuracy:true,maximumAge:1000,timeout:15000});
+  setTimeout(()=>{ if(!lastPos) startSim(true); },12000);
+}
+function stopGPS(){ if(watchId!==null){navigator.geolocation.clearWatch(watchId);watchId=null;} }
+function setPill(t){ $('#gpspill').textContent='GPS '+t; }
+function onErr(e){ setPill(e.code===1?'권한거부':'약함'); if(!lastPos) startSim(true); }
+
+function onFix(pos){
+  const acc=pos.coords.accuracy; curAcc=acc;
+  setPill('±'+Math.round(acc)+'m');
+  if(acc>CFG.GPS_MAX_ACCURACY) return;
+  if(simTimer) return;
+  addPoint({lat:pos.coords.latitude,lon:pos.coords.longitude,t:pos.timestamp||Date.now()});
+}
+
+function addPoint(p){
+  if(lastPos){
+    const d=haversine(lastPos,p), dt=Math.max(.5,(p.t-lastPos.t)/1000);
+    if(d/dt>CFG.GPS_MAX_SPEED) return;
+    if(d<1.5){ lastPos=p; return; }
+    if(F){ F.dist+=d; addCharge(d/10*CFG.CHARGE_PER_10M); }
+  }
+  lastPos=p;
+  if(F){
+    F.path.push([p.lat,p.lon]);
+    if(F.path.length>4000) F.path.shift();
+  }
+  if(map){
+    if(F) pathLine.setLatLngs(F.path);
+    meMarker.setLatLng([p.lat,p.lon]);
+    accCircle.setLatLng([p.lat,p.lon]).setRadius(Math.min(curAcc||12,45));
+    if(follow) map.panTo([p.lat,p.lon],{animate:true,duration:.5});
+  }
+  refreshBuildings(p.lat,p.lon);
+  refreshSpawns();
+}
+
+function startSim(quiet){
+  if(simTimer) return;
+  stopGPS(); setPill('시뮬');
+  if(!quiet) toast('시뮬레이션','실제 위치 대신 걷기를 흉내냅니다.',false);
+  let lat=(lastPos?lastPos.lat:CFG.START[0]), lon=(lastPos?lastPos.lon:CFG.START[1]);
+  let head=Math.PI*1.25;
+  if(map) map.setView([lat,lon],18);
+  simTimer=setInterval(()=>{
+    head+=(Math.random()-.5)*.3;
+    const step=1.4*.6;
+    lat+=Math.cos(head)*step/111320;
+    lon+=Math.sin(head)*step/(111320*Math.cos(lat*Math.PI/180));
+    curAcc=8;
+    addPoint({lat,lon,t:Date.now()});
+    paintHUD();
+  },600);
+}
+function stopSim(){ if(simTimer){clearInterval(simTimer);simTimer=null;} }
+
+/* ---------- 스폰 / 조우 ---------- */
+function addCharge(n){
+  F.charge+=n;
+  while(F.charge>=CFG.CHARGE_FULL){ F.charge-=CFG.CHARGE_FULL; spawn(); }
+}
+function pickSpecies(){
+  const pool=SPECIES.filter(s=>!(S.dex[s.id]&&S.dex[s.id].cleared));
+  if(!pool.length) return null;
+  let r=Math.random()*pool.reduce((a,s)=>a+s.w,0);
+  for(const s of pool){ r-=s.w; if(r<=0) return s; }
+  return pool[0];
+}
+function spawn(){
+  if(!F||!lastPos||!map) return;
+  if(F.spawns.length>=CFG.MAX_ON_MAP) return;
+  const eff=effortOf(F);
+  const bossCleared=S.dex[BOSS.id]&&S.dex[BOSS.id].cleared;
+  let sp;
+  if(!F.bossSpawned&&!bossCleared&&eff>=CFG.BOSS_MIN_EFF&&Math.random()<CFG.BOSS_CHANCE){
+    sp=BOSS; F.bossSpawned=true;
+  } else { sp=pickSpecies(); }
+  if(!sp) return;
+
+  const dist=CFG.SPAWN_MIN_M+Math.random()*(CFG.SPAWN_MAX_M-CFG.SPAWN_MIN_M);
+  const [la,lo]=offset(lastPos.lat,lastPos.lon,dist,Math.random()*Math.PI*2);
+  const marker=L.marker([la,lo],{icon:L.divIcon({className:'',
+    html:'<div class="mon'+(sp.boss?' boss':'')+' far"><div class="body" style="background:'+
+         sp.color+'"></div><div class="shadow"></div></div>',
+    iconSize:[52,60],iconAnchor:[26,52]})}).addTo(map);
+  const rec={sp,marker,born:Date.now(),lat:la,lon:lo};
+  marker.on('click',()=>tryCatch(rec));
+  F.spawns.push(rec);
+
+  if(sp.boss) toast(sp.name+' 출현!','지금 끝내면 ×'+multOf(eff).toFixed(1)+'. 더 주울수록 약해집니다.',true);
+  else toast(sp.name+' 발견','근처를 지나가면 저절로 기록됩니다.',false);
+  refreshSpawns();
+}
+
+function refreshSpawns(){
+  if(!F||!lastPos) return;
+  const now=Date.now();
+  F.spawns=F.spawns.filter(rec=>{
+    if(now-rec.born>CFG.SPAWN_TTL_MS){ map.removeLayer(rec.marker); return false; }
+    const d=haversine(lastPos,{lat:rec.lat,lon:rec.lon});
+    const el=rec.marker.getElement();
+    if(el){ const m=el.querySelector('.mon'); if(m) m.classList.toggle('far',d>CFG.CATCH_RANGE_M); }
+    rec.d=d; return true;
+  });
+  if(CFG.AUTO_CATCH){
+    const hit=F.spawns.find(r=>r.d<=CFG.CATCH_RANGE_M);
+    if(hit && !$('#catch').classList.contains('on')) { autoCatch(hit); return; }
+  }
+  const near=F.spawns.filter(r=>r.d<=CFG.CATCH_RANGE_M).length;
+  const hint=$('#hint'), ht=$('#hinttext');
+  if(!F.spawns.length){ hint.classList.remove('warn'); ht.textContent='걸을수록 몬스터가 나타납니다'; }
+  else if(near){ hint.classList.add('warn'); ht.innerHTML='사거리 안에 <b>'+near+'마리</b> — 탭해서 조우'; }
+  else{
+    hint.classList.remove('warn');
+    const closest=Math.round(Math.min(...F.spawns.map(r=>r.d)));
+    ht.innerHTML='가장 가까운 놈까지 <b>'+closest+'m</b>';
+  }
+}
+
+/* 폰을 안 보고 걸어도 사거리에 들어오면 저절로 등록된다 */
+function autoCatch(rec){
+  map.removeLayer(rec.marker);
+  F.spawns=F.spawns.filter(r=>r!==rec);
+  F.met.push(rec.sp.id);
+  S.dex[rec.sp.id]=S.dex[rec.sp.id]||{seen:false,cleared:false};
+  S.dex[rec.sp.id].seen=true; save();
+  if(navigator.vibrate) navigator.vibrate(rec.sp.boss?[30,60,30,60,30]:[20,50,20]);
+  toast(rec.sp.name+' 조우',rec.sp.flavor,!!rec.sp.boss);
+  paintHUD();
+}
+
+function tryCatch(rec){
+  if(!F||!lastPos) return;
+  const d=haversine(lastPos,{lat:rec.lat,lon:rec.lon});
+  if(d>CFG.CATCH_RANGE_M){ toast('너무 멉니다',Math.round(d-CFG.CATCH_RANGE_M)+'m 더 가까이 가세요.',false); return; }
+  curCatch=rec;
+  const c=$('#catch');
+  c.classList.toggle('boss',!!rec.sp.boss);
+  $('#c-blob').style.background=rec.sp.color;
+  $('#c-name').textContent=rec.sp.name;
+  $('#c-flavor').textContent=rec.sp.flavor;
+  c.classList.add('on');
+  if(navigator.vibrate) navigator.vibrate([18,40,18]);
+}
+$('#c-ok').onclick=()=>{
+  const rec=curCatch; if(!rec) return;
+  $('#catch').classList.remove('on');
+  map.removeLayer(rec.marker);
+  F.spawns=F.spawns.filter(r=>r!==rec);
+  F.met.push(rec.sp.id);
+  S.dex[rec.sp.id]=S.dex[rec.sp.id]||{seen:false,cleared:false};
+  S.dex[rec.sp.id].seen=true; save();
+  curCatch=null; paintHUD(); refreshSpawns();
+};
+
+let toastTimer=null;
+function toast(t,d,boss){
+  const el=$('#toast'); $('#toast-t').textContent=t; $('#toast-d').textContent=d;
+  el.style.background=boss?'rgba(232,85,47,.96)':'rgba(16,38,46,.95)';
+  el.classList.add('on'); clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.classList.remove('on'),boss?4800:2400);
+}
+
+/* ---------- HUD ---------- */
+const fmt=ms=>{const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
+function paintHUD(){
+  if(!F) return;
+  const eff=effortOf(F), m=multOf(eff), col=multColor(m);
+  $('#mult').innerHTML='<span class="x">×</span>'+m.toFixed(1);
+  $('#mult').style.color=col;
+  const p=clamp((CFG.MULT_MAX-m)/(CFG.MULT_MAX-CFG.MULT_MIN),0,1);
+  $('#multbar').style.width=(p*100)+'%'; $('#multbar').style.background=col;
+  $('#r-dist').textContent=Math.round(F.dist)+'m';
+  $('#r-time').textContent=fmt(Date.now()-F.t0);
+  $('#r-met').textContent=F.met.length;
+  const left=Math.max(0,Math.round((CFG.CHARGE_FULL-F.charge)/CFG.CHARGE_PER_10M*10));
+  $('#r-next').textContent=left+'m';
+  refreshSpawns();
+}
+
+/* ---------- 조작 ---------- */
+$('#btn-start').onclick=()=>startSession();
+$('#btn-dex1').onclick=()=>{paintDex();show('s-dex')};
+$('#btn-back').onclick=()=>{ setIdle(!F); show('s-field'); };
+$('#btn-recenter').onclick=()=>{
+  follow=true;
+  if(lastPos) map.setView([lastPos.lat,lastPos.lon],18,{animate:true});
+};
+/* ============================================================
+   테스트 패널 — 배틀 시스템 개발용. 실서비스에서는 통째로 지우세요.
+   ============================================================ */
+let TEST_MULT=1.0;
+
+function buildTestPanel(){
+  const sp=$('#t-spawn'), bt=$('#t-battle'), mu=$('#t-mult');
+  sp.innerHTML=''; bt.innerHTML=''; mu.innerHTML='';
+
+  ALL.forEach(m=>{
+    const a=document.createElement('button');
+    a.className='tchip';
+    a.innerHTML='<span class="sw" style="background:'+m.color+'"></span>'+m.name;
+    a.onclick=()=>testSpawn(m);
+    sp.appendChild(a);
+
+    const b=document.createElement('button');
+    b.className='tchip';
+    b.innerHTML='<span class="sw" style="background:'+m.color+'"></span>'+m.name;
+    b.onclick=()=>instantBattle(m);
+    bt.appendChild(b);
+  });
+
+  [7,5,3,2,1].forEach(v=>{
+    const btn=document.createElement('button');
+    btn.textContent='×'+v.toFixed(1);
+    btn.onclick=()=>{ TEST_MULT=v; buildTestPanel(); };
+    if(Math.abs(TEST_MULT-v)<0.01) btn.classList.add('sel');
+    mu.appendChild(btn);
+  });
+}
+
+/* 지도에 강제로 한 마리 띄운다 (도감 확정 여부 무시) */
+function testSpawn(sp){
+  if(!F) startSession();
+  if(!lastPos){ toast('위치가 아직 없습니다','시뮬레이션이 시작될 때까지 잠깐 기다려주세요.',false); return; }
+  const [la,lo]=offset(lastPos.lat,lastPos.lon,30,Math.random()*Math.PI*2);
+  const marker=L.marker([la,lo],{icon:L.divIcon({className:'',
+    html:'<div class="mon'+(sp.boss?' boss':'')+' far"><div class="body" style="background:'+
+         sp.color+'"></div><div class="shadow"></div></div>',
+    iconSize:[52,60],iconAnchor:[26,52]})}).addTo(map);
+  const rec={sp,marker,born:Date.now(),lat:la,lon:lo};
+  marker.on('click',()=>tryCatch(rec));
+  F.spawns.push(rec);
+  toast(sp.name+' 소환','30m 앞. 다가가면 조우됩니다.',!!sp.boss);
+  refreshSpawns();
+}
+
+/* 줍깅 과정을 건너뛰고 배틀 화면으로 직행 */
+function instantBattle(sp){
+  $('#testpanel').classList.remove('on');
+  $('#btn-test').classList.add('off');
+  curBattle={sid:sp.id, mult:TEST_MULT, at:Date.now()};
+  startBattle(sp,TEST_MULT);
+}
+
+$('#btn-test').onclick=()=>{
+  const panel=$('#testpanel');
+  const on=!panel.classList.contains('on');
+  panel.classList.toggle('on',on);
+  $('#btn-test').classList.toggle('off',!on);
+  if(on) buildTestPanel();
+};
+$('#t-clearq').onclick=()=>{ S.queue=[]; save(); toast('대기열을 비웠습니다','',false); };
+$('#t-cleardex').onclick=()=>{ S.dex={}; S.queue=[]; save();
+  toast('도감을 초기화했습니다','모든 몬스터가 다시 나타납니다.',false); };
+
+$('#btn-gwangalli').onclick=()=>{
+  follow=false;
+  map.setView([LANDMARKS[0].lat,LANDMARKS[0].lon],17,{animate:true});
+  refreshBuildings(LANDMARKS[0].lat,LANDMARKS[0].lon);
+  toast('광안리해수욕장','35.15317, 129.11867 — 지도만 이동했고 내 위치는 그대로입니다.',false);
+};
+
+$('#btn-dex2').onclick=()=>{paintDex();show('s-dex')};
+$('#btn-done').onclick=()=>{
+  if(!F) return;
+  stopGPS(); stopSim(); clearInterval(tickTimer);
+  F.spawns.forEach(r=>map.removeLayer(r.marker)); F.spawns=[];
+  pathLine.setLatLngs([]);
+  const m=multOf(effortOf(F));
+  F.finalMult=m;
+  F.coins=Math.round(F.dist*CFG.COIN_PER_M+F.minutes()*CFG.COIN_PER_MIN);
+  F.elapsed=Date.now()-F.t0;
+  $('#v-mult').textContent='×'+m.toFixed(1)+' 로 확정';
+  $('#v-dist').textContent=Math.round(F.dist)+' m';
+  $('#v-time').textContent=fmt(F.elapsed);
+  $('#v-pick').textContent=F.picks+' 개';
+  $('#v-coin').textContent='0 (인증 필요)';
+  $('#shot').innerHTML='<span>사진 없음</span>';
+  $('#v-queue').textContent=F.met.length;
+  show('s-verify');
+};
+$('#btn-shoot').onclick=()=>$('#file').click();
+$('#file').onchange=e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  $('#shot').innerHTML='<img src="'+URL.createObjectURL(f)+'" alt="수거한 쓰레기">';
+  $('#v-coin').textContent=F.coins.toLocaleString()+' 코인';
+  S.coins+=F.coins; save(); paintCoins();
+};
+$('#btn-toBattle').onclick=()=>{
+  F.met.forEach(id=>S.queue.push({sid:id,mult:F.finalMult,at:Date.now()}));
+  save(); F=null; setIdle(true); nextBattle();
+};
+
+/* ============================================================
+   배틀 — 카드 3종(공격/방어/충전), 손패 4장, 합치기
+   ============================================================ */
+const BTL = {
+  PLAYER_HP:120,
+  ENERGY_START:3, ENERGY_MAX:10,
+  HAND:4,
+  DRAW_W:{atk:38, def:34, chg:28},   // 카드 등장 비율
+
+  ATK_DMG:10,        // 공격 1장
+  HEAVY_DMG:28,      // 공+공 (방어 관통)
+  DEF_REDUCE:0.6,    // 방어: 받는 피해 60% 감소
+  CHARGE:2,          // 충전: 에너지 +2
+
+  COST:{atk:1, def:0, chg:0, heavy:3, evade:2},
+
+  FOE_GUARD_REDUCE:0.5,  // 적이 방어 중일 때 내 피해 감소
+  FOE_HEAVY_MUL:1.8,     // 적 강공 배수
+  ATK_SCALE:0.30         // 적 공격력 = 기본 × (1 + (배율-1)×ATK_SCALE)
+};
+
+const CARD_INFO={
+  atk:{n:'공격', i:'⚔', c:'atk'},
+  def:{n:'방어', i:'🛡', c:'def'},
+  chg:{n:'충전', i:'⚡', c:'chg'}
+};
+
+let B=null;
+
+function foeStats(sp,mult){
+  return {
+    hp: sp.hp,                                          // 체력은 배율 영향 없음 — 싸움이 길어지지 않게
+    atk: Math.round(sp.atk*(1+(mult-1)*BTL.ATK_SCALE))  // 배율은 공격력에만
+  };
+}
+
+function startBattle(sp,mult){
+  const st=foeStats(sp,mult);
+  B={ sp, mult,
+      foeHp:st.hp, foeHpMax:st.hp, foeAtk:st.atk,
+      myHp:BTL.PLAYER_HP, myHpMax:BTL.PLAYER_HP,
+      energy:BTL.ENERGY_START,
+      hand:[], sel:[], guard:0, foeGuard:false, discarded:false,
+      recent:[], turn:1, over:false };
+  $('#result').classList.remove('on');
+  $('#b-name').textContent=sp.name;
+  $('#b-flavor').textContent=sp.flavor;
+  $('#b-mult').textContent='×'+mult.toFixed(1);
+  const art=$('#foeart');
+  art.className='foeart'+(sp.boss?' boss':'');
+  art.style.background=sp.color;
+  $('#btllog').innerHTML='';
+  logB('<span class="hi">'+sp.name+'</span>이(가) 나타났다. 공격력 '+st.atk+'.');
+  drawHand();
+  renderBattle();
+  show('s-battle');
+}
+
+function drawCard(){
+  const w=BTL.DRAW_W, total=w.atk+w.def+w.chg;
+  let r=Math.random()*total;
+  if((r-=w.atk)<0) return 'atk';
+  if((r-=w.def)<0) return 'def';
+  return 'chg';
+}
+function drawHand(){
+  while(B.hand.length<BTL.HAND) B.hand.push(drawCard());
+}
+
+function logB(html){
+  const el=$('#btllog');
+  const d=document.createElement('div');
+  d.innerHTML=html;
+  el.appendChild(d);
+  el.scrollTop=el.scrollHeight;
+}
+
+function renderBattle(){
+  if(!B) return;
+  $('#foehp').style.width=Math.max(0,B.foeHp/B.foeHpMax*100)+'%';
+  $('#foehptext').textContent=Math.max(0,B.foeHp)+' / '+B.foeHpMax;
+  $('#foestate').textContent=B.foeGuard?'방어 태세':'';
+  $('#myhp').style.width=Math.max(0,B.myHp/B.myHpMax*100)+'%';
+  $('#myhptext').textContent=Math.max(0,B.myHp)+' / '+B.myHpMax
+    +(B.guard===2?'  회피 준비':B.guard===1?'  방어 중':'');
+
+  const pips=$('#energy'); pips.innerHTML='';
+  for(let i=0;i<Math.max(BTL.ENERGY_START,B.energy);i++){
+    const d=document.createElement('span');
+    d.className='pip'+(i<B.energy?' on':'');
+    pips.appendChild(d);
+  }
+
+  const hand=$('#hand'); hand.innerHTML='';
+  B.hand.forEach((t,i)=>{
+    const info=CARD_INFO[t];
+    const el=document.createElement('button');
+    el.className='card '+info.c+(B.sel.includes(i)?' sel':'');
+    if(B.energy<BTL.COST[t]) el.classList.add('dead');
+    el.innerHTML='<div class="ci">'+info.i+'</div><div class="cn">'+info.n+'</div>'+
+                 '<div class="cc">'+(BTL.COST[t]===0?'무료':BTL.COST[t]+' 에너지')+'</div>';
+    el.onclick=()=>toggleCard(i);
+    hand.appendChild(el);
+  });
+
+  const p=planOf();
+  $('#handhint').textContent=p.hint;
+  $('#b-play').disabled=!p.ok;
+  $('#b-toss').disabled=B.discarded||B.sel.length!==1;
+  $('#b-toss').textContent=B.discarded?'버리기 완료':'버리기';
+}
+
+function toggleCard(i){
+  if(B.over) return;
+  const at=B.sel.indexOf(i);
+  if(at>=0) B.sel.splice(at,1);
+  else{
+    if(B.sel.length>=2) B.sel.shift();
+    B.sel.push(i);
+  }
+  renderBattle();
+}
+
+/* 지금 선택으로 무엇이 되는지 */
+function planOf(){
+  const sel=B.sel.map(i=>B.hand[i]);
+  if(sel.length===0) return {ok:false, hint:'카드를 골라 실행하세요'};
+  if(sel.length===1){
+    const t=sel[0];
+    if(B.energy<BTL.COST[t]) return {ok:false, hint:'에너지가 모자랍니다'};
+    if(t==='atk') return {ok:true, kind:'atk', hint:'공격 — '+BTL.ATK_DMG+' 피해 (에너지 1)'};
+    if(t==='def') return {ok:true, kind:'def', hint:'방어 — 받는 피해 60% 감소 (무료)'};
+    return {ok:true, kind:'chg', hint:'충전 — 에너지 +'+BTL.CHARGE+' (무료)'};
+  }
+  const [a,b]=sel;
+  if(a!==b) return {ok:false, hint:'다른 종류는 합칠 수 없습니다'};
+  if(a==='chg') return {ok:false, hint:'충전은 합칠 수 없습니다'};
+  if(a==='atk'){
+    if(B.energy<BTL.COST.heavy) return {ok:false, hint:'강공에는 에너지 3이 필요합니다'};
+    return {ok:true, kind:'heavy', hint:'공+공 강공 — '+BTL.HEAVY_DMG+' 피해, 방어 관통 (에너지 3)'};
+  }
+  if(B.energy<BTL.COST.evade) return {ok:false, hint:'회피에는 에너지 2가 필요합니다'};
+  return {ok:true, kind:'evade', hint:'방+방 회피 — 이번 턴 모든 공격 무효 (에너지 2)'};
+}
+
+function hitFoe(dmg,pierce){
+  let d=dmg;
+  if(B.foeGuard && !pierce) d=Math.round(d*(1-BTL.FOE_GUARD_REDUCE));
+  B.foeHp-=d;
+  const art=$('#foeart');
+  art.classList.remove('hurt'); void art.offsetWidth; art.classList.add('hurt');
+  return d;
+}
+
+$('#b-play').onclick=()=>{
+  if(!B||B.over) return;
+  const p=planOf();
+  if(!p.ok) return;
+
+  const cost=BTL.COST[p.kind];
+  B.energy-=cost;
+
+  if(p.kind==='atk'){
+    const d=hitFoe(BTL.ATK_DMG,false);
+    logB('공격 — <span class="dmg">'+d+'</span> 피해'+(B.foeGuard?' (방어에 막힘)':''));
+    B.recent.push('atk');
+  } else if(p.kind==='heavy'){
+    const d=hitFoe(BTL.HEAVY_DMG,true);
+    logB('<span class="hi">공+공 강공</span> — <span class="dmg">'+d+'</span> 피해, 방어 관통');
+    B.recent.push('atk');
+  } else if(p.kind==='def'){
+    B.guard=Math.max(B.guard,1);
+    logB('방어 태세를 갖췄다.');
+    B.recent.push('def');
+  } else if(p.kind==='evade'){
+    B.guard=2;
+    logB('<span class="hi">방+방 회피</span> — 이번 턴 공격을 모두 피한다.');
+    B.recent.push('def');
+  } else {
+    B.energy=Math.min(BTL.ENERGY_MAX,B.energy+BTL.CHARGE);
+    logB('충전 — 에너지 +'+BTL.CHARGE);
+    B.recent.push('chg');
+  }
+  if(B.recent.length>3) B.recent.shift();
+
+  // 사용한 카드 제거 (안 쓴 카드는 손에 남는다)
+  B.sel.sort((a,b)=>b-a).forEach(i=>B.hand.splice(i,1));
+  B.sel=[];
+
+  if(B.foeHp<=0){ endBattle(true); return; }
+  renderBattle();
+};
+
+/* 적 행동 — 예고 없음. 대신 플레이어의 최근 3턴을 읽고 반응한다. */
+function foeChoose(){
+  const r=B.recent;
+  const aggro=r.filter(x=>x==='atk').length;
+  const passive=r.filter(x=>x!=='atk').length;
+  let w={hit:50, heavy:25, guard:25};
+  if(aggro>=2){ w.guard+=25; w.hit-=10; }        // 계속 때리면 막으려 든다
+  if(passive>=2){ w.heavy+=30; w.guard-=15; }    // 웅크리면 크게 친다
+  if(B.foeHp/B.foeHpMax<0.35){ w.heavy+=20; }    // 몰리면 난폭해진다
+  const total=Math.max(1,w.hit)+Math.max(1,w.heavy)+Math.max(1,w.guard);
+  let x=Math.random()*total;
+  if((x-=Math.max(1,w.hit))<0) return 'hit';
+  if((x-=Math.max(1,w.heavy))<0) return 'heavy';
+  return 'guard';
+}
+
+$('#b-end').onclick=()=>{
+  if(!B||B.over) return;
+  B.foeGuard=false;
+  const act=foeChoose();
+
+  if(act==='guard'){
+    B.foeGuard=true;
+    logB('<span class="hi">'+B.sp.name+'</span>이(가) 몸을 웅크렸다.');
+  } else {
+    const raw = act==='heavy' ? Math.round(B.foeAtk*BTL.FOE_HEAVY_MUL) : B.foeAtk;
+    if(B.guard===2){
+      logB('<span class="hi">'+B.sp.name+'</span>의 '+(act==='heavy'?'강타':'공격')+' — 회피했다.');
+    } else {
+      const d = B.guard===1 ? Math.round(raw*(1-BTL.DEF_REDUCE)) : raw;
+      B.myHp-=d;
+      logB('<span class="hi">'+B.sp.name+'</span>의 '+(act==='heavy'?'강타':'공격')+
+           ' — <span class="dmg">'+d+'</span> 피해'+(B.guard===1?' (방어로 감소)':''));
+    }
+  }
+
+  B.guard=0;
+  B.discarded=false;
+  B.turn++;
+  if(B.myHp<=0){ endBattle(false); return; }
+  drawHand();
+  renderBattle();
+};
+
+/* 원하지 않는 카드로 손이 잠기지 않게 — 턴당 1장 교체 */
+$('#b-toss').onclick=()=>{
+  if(!B||B.over||B.discarded||B.sel.length!==1) return;
+  const i=B.sel[0];
+  const t=B.hand[i];
+  B.hand.splice(i,1);
+  B.hand.push(drawCard());
+  B.discarded=true; B.sel=[];
+  logB(CARD_INFO[t].n+' 카드를 버리고 새로 뽑았다.');
+  renderBattle();
+};
+
+$('#b-flee').onclick=()=>{
+  if(!B) return;
+  B.over=true;
+  loseBattle('물러났습니다');
+};
+
+function endBattle(win){
+  B.over=true;
+  const res=$('#result');
+  if(win){
+    $('#res-title').textContent='격파';
+    $('#res-desc').textContent=B.sp.name+'을(를) 쓰러뜨렸습니다. 도감에 확정되고 다시는 나타나지 않습니다.';
+  } else {
+    $('#res-title').textContent='패배';
+    $('#res-desc').textContent='잃은 것은 없습니다. 대기열에 남아 언제든 다시 도전할 수 있습니다.';
+  }
+  res.classList.add('on');
+  $('#res-ok').onclick=()=> win ? winBattle() : loseBattle();
+}
+
+function winBattle(){
+  $('#result').classList.remove('on');
+  const sp=B.sp;
+  S.dex[sp.id]=S.dex[sp.id]||{seen:true,cleared:false};
+  S.dex[sp.id].cleared=true;
+  S.queue=S.queue.filter(q=>q.sid!==sp.id);
+  save(); B=null; curBattle=null;
+  if(!S.queue.length){ setIdle(!F); show('s-field'); return; }
+  nextBattle();
+}
+function loseBattle(msg){
+  $('#result').classList.remove('on');
+  if(S.queue.length) S.queue.push(S.queue.shift());
+  save(); B=null; curBattle=null;
+  if(msg) toast(msg,'',false);
+  if(!S.queue.length){ setIdle(!F); show('s-field'); return; }
+  nextBattle();
+}
+
+function nextBattle(){
+  if(!S.queue.length){ paintDex(); show('s-dex'); return; }
+  curBattle=S.queue[0];
+  const sp=ALL.find(s=>s.id===curBattle.sid);
+  startBattle(sp,curBattle.mult);
+}
+
+function paintDex(){
+  const grid=$('#dexgrid'); grid.innerHTML=''; let cleared=0;
+  ALL.forEach(sp=>{
+    const st=S.dex[sp.id]||{seen:false,cleared:false};
+    if(st.cleared) cleared++;
+    const cell=document.createElement('div');
+    cell.className='dexcell'+(st.cleared?'':' locked');
+    const g=document.createElement('div'); g.className='glyph';
+    g.style.background=st.cleared?sp.color:(st.seen?'#B6C4CA':'#DFE7EA');
+    if(sp.boss) g.style.borderRadius='50%';
+    const nm=document.createElement('div'); nm.className='nm'; nm.textContent=st.seen?sp.name:'???';
+    const stt=document.createElement('div'); stt.className='st';
+    stt.textContent=st.cleared?'확정':(st.seen?'조우':'미발견');
+    cell.append(g,nm,stt); grid.appendChild(cell);
+  });
+  $('#dex-count').textContent=cleared+' / '+ALL.length;
+  const q=$('#queuelist'); q.innerHTML='';
+  if(!S.queue.length) q.innerHTML='<p class="note">대기 중인 상대가 없습니다.</p>';
+  else S.queue.forEach(it=>{
+    const sp=ALL.find(s=>s.id===it.sid);
+    const row=document.createElement('div'); row.className='kv';
+    row.innerHTML='<span>'+sp.name+'</span><b>×'+it.mult.toFixed(1)+'</b>';
+    q.appendChild(row);
+  });
+}
+
+$('#btn-recenter2').onclick=$('#btn-recenter').onclick;
+load(); boot();
+</script>
+</body>
+</html>
